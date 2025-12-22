@@ -52,7 +52,7 @@ class DevEvalProcessor:
         return tests[:185]
 
     def generate_jsonl(self):
-        out_file = os.path.join(self.output_path, self.mode + '_results3.jsonl')
+        out_file = os.path.join(self.output_path, self.mode + '_results4.jsonl')
         with open(out_file, 'w', encoding='utf-8') as f:
             for result in self.results:
                 json_line = json.dumps(result)
@@ -85,8 +85,9 @@ STRATEGY: {context_instruction}
 
 EXECUTE WORKFLOW:
 1. Use analyze_deveval_requirements to understand the task
-2. Use call_agent_with_reflection to call 'DevEvalCoder' with coding task
-3. Use call_agent_with_selected_context to call 'DevEvalReviewer' for validation
+2. Generate the bdd_tests needed for validation
+2. Use call_agent_with_reflection to call 'DevEvalCoder' with coding task andd the bdd_tests as validation criteria
+3. Use call_agent_with_selected_context to call 'DevEvalReviewer' for validation based on the bdd_tests.
 4. Extract final clean function body
 5. validate_function_body(function_body=<step 3 result>, requirements="{requirements}")
    - If validation fails, regenerate from step 2 with fixes
