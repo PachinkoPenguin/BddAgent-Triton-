@@ -13,7 +13,7 @@ from game.llms import create_simple_llm_function
 from game.memory import Goal, Memory
 from game.agentLanguage import AgentFunctionCallingActionLanguage
 
-import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, tools.devEvalTools
+import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, tools.devEvalTools, tools.tritonTools
 
 
 class DevEvalProcessor:
@@ -374,18 +374,97 @@ CRITICAL: Final output must be ONLY function body, 4-space indented, no 'def' li
                 traceback.print_exc()
         self.generate_jsonl()
 
+class PyTorchToTritonProcessor:
+    def __init__(self, llm_function, input_path: str, output_path: str = "triton_kernels.jsonl"):
+        self.llm_function = llm_function
+        self.input_path = input_path
+        self.output_path = output_path
+        self.pytorch_code_samples = self.load_pytorch_samples()
+
+    def load_pytorch_samples(self) -> List[Dict]:
+        samples = []
+        with open(self.input_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    sample = json.loads(line)
+                    pytorch_code = sample['code']
+                    newJSON = {
+                        "pytorch_code": pytorch_code
+                    }
+                    samples.append(newJSON)
+                except json.JSONDecodeError as e:
+                    print(f"Error decoding JSON line: {line}\nError: {str(e)}")
+        print(samples)
+        return samples
+    
+    def create_triton_task(self, pytorch_code: str) -> str:
+        task = f"""
+AVAILABLE AGENTS (use EXACTLY these names):
+- "TritonDeveloper": generates Triton kernel code
+- "TritonReviewer": reviews and validates Triton code
+
+YOU MUST COMPLETE ALL THESE STEPS IN ORDER, DO NOT SKIP ANY:
+1. Use get_gpu_specs tool to get GPU architecture information.
+2. Call agent "TritonDeveloper" with the PyTorch code and GPU specs to generate a Triton kernel.
+3. Call agent "TritonReviewer" with the generated kernel to validate it.
+4. Use execute_pytorch_code tool to run the original PyTorch code and get results.
+5. Use execute_triton_code tool to run the generated Triton kernel and get results.
+6. Use validate_outputs tool to compare both results.
+7. You MUST Use save_to_dataset tool to save everything.
+8. Only after completing ALL steps above, call terminate.
+
+PyTorch code:
+{pytorch_code}
+
+CRITICAL: You MUST call save_to_dataset before terminate. Do not skip steps.
+"""
+        return task
+
+    def process(self):
+        llm_function = create_simple_llm_function("azure/gpt-4.1-mini")
+        for sample in self.pytorch_code_samples:
+            try:
+                pytorch_code = sample['pytorch_code']
+                
+                sharedMemory = Memory()
+                registry = AgentRegistry()
+
+                mainAgent = create_project_manager_agent(llm_function)
+                codingAgent = create_developer_agent(llm_function)
+                codeReviewer = create_code_reviewer_agent(llm_function)
+
+                registry.register_agent("TritonDeveloper", codingAgent.run)
+                registry.register_agent("TritonReviewer", codeReviewer.run)
+
+                task = self.create_triton_task(pytorch_code)
+
+                action_context = {
+                    "agent_registry": registry,
+                    "target_language": "python",
+                    "project_type": "triton_kernel",
+                    "shared_memory": sharedMemory,
+                    "llm": llm_function,
+                    "dataset_path": self.output_path
+                }
+
+                result_memory = mainAgent.run(
+                    user_input=task,
+                    memory=sharedMemory,
+                    action_context_props=action_context)
+            except Exception as e:
+                print(f"Error processing sample {sample}: {str(e)}")
+                traceback.print_exc()
+        return result_memory
+
 
 def create_project_manager_agent(llm_function) -> Agent:
     goals = [
-        Goal(1, "Requirments Analysis",
-                "Analyze the project requirements, break them into tasks, and coordinate team workflow"),
-        Goal(2, "Project Planning",
-                "Create implementation plans and ensure all requirements are met"),
-        Goal(3, "Quality Coordination",
-                "Ensure code quality through proper review and testing workflows")
+        Goal(1, "PyTorch Analysis", "Thoroughly analyze the provided PyTorch code and requirements to understand the functionality and performance characteristics"),
+        Goal(2, "Agent Coordination", "Delegate specific coding tasks to the developer agent and coordinate the review process with the code reviewer agent"),
+        Goal(3, "Project Oversight", "Ensure the overall project stays on track, meets requirements, and maintains high quality through effective coordination and feedback")
     ]
 
-    action_registry = DecoratorActionRegistry(tags=["expert", "agent", "coordination", "analysis", "file_operations", "general"])
+    action_registry = DecoratorActionRegistry(tags=["triton", "hardware", "execution", "dataset", "selective", "file_operations"])
     action_registry.register_terminate_tool()
 
     agent_language = AgentFunctionCallingActionLanguage()
@@ -397,22 +476,20 @@ def create_project_manager_agent(llm_function) -> Agent:
         action_registry = action_registry,
         generate_response = llm_function,
         environment = environment,
-        agent_name = "Project Manager Agent",
+        agent_name = "Triton Project Manager Agent",
     )
 
 def create_developer_agent(llm_function) -> Agent:
 
     goals = [
-        Goal(1, "Backend Development",
-             "Develop clean, functional backend APIs using best practices"),
-        Goal(2, "Code Quality",
-             "Write maintainable, well-documented code with proper error handling"),
-        Goal(3, "API Design",
-             "Create RESTful APIs with appropriate endpoints and response formats")
+        Goal(1, "Generate Triton Code", "Write efficient Triton code based on the PyTorch implementation and requirements provided by the project manager"),
+        Goal(2, "Implement Functionality", "Ensure the generated code correctly implements the required functionality and meets performance standards"),
+        Goal(3, "Iterate Based on Feedback", "Refine and improve code based on feedback from the project manager and code reviewer")
     ]
 
+
     # Tools for development and coding
-    action_registry = DecoratorActionRegistry(tags=["expert", "file_operations", "coding"])
+    action_registry = DecoratorActionRegistry(tags=["generation", "coding"])
     action_registry.register_terminate_tool()
 
     agent_language = AgentFunctionCallingActionLanguage()
@@ -424,7 +501,7 @@ def create_developer_agent(llm_function) -> Agent:
         action_registry=action_registry,
         generate_response=llm_function,
         environment=environment,
-        agent_name="Developer",
+        agent_name="Triton Developer Agent",
         max_iterations=10
     )
 
@@ -433,14 +510,14 @@ def create_code_reviewer_agent(llm_function) -> Agent:
     goals = [
         Goal(1, "Code Quality Review",
              "Review code for quality, best practices, and potential issues"),
-        Goal(2, "Security Analysis",
+        Goal(2, "Performance Review",
+             "Analyze code for performance optimization opportunities"),
+        Goal(3, "Security Analysis",
              "Identify security vulnerabilities and suggest improvements"),
-        Goal(3, "Performance Review",
-             "Analyze code for performance optimization opportunities")
     ]
 
     # Tools for review and quality assurance
-    action_registry = DecoratorActionRegistry(tags=[ "deveval"])
+    action_registry = DecoratorActionRegistry(tags=["validation", "review"])
     action_registry.register_terminate_tool()
 
     agent_language = AgentFunctionCallingActionLanguage()
@@ -452,7 +529,7 @@ def create_code_reviewer_agent(llm_function) -> Agent:
         action_registry=action_registry,
         generate_response=llm_function,
         environment=environment,
-        agent_name="DevEvalReviewer",
+        agent_name="Triton Code Reviewer",
         max_iterations=10
     )
 
@@ -478,7 +555,7 @@ def main():
         "gemini/gemini-2.5-pro",
         "azure/gpt-4.1-mini"
     ]
-    llm_function = create_simple_llm_function(models[5])
+    llm_function = create_simple_llm_function(models[3])
 
     project_manager = create_project_manager_agent(llm_function)
     developer = create_developer_agent(llm_function)
@@ -499,28 +576,13 @@ def main():
     #     memory=shared_memory,
     #     target_language="python"
     # )
-
-    task = """
-    Create a backend API in a folder called 'backend' with the following requirements:
-    1. A basic CRUD API for managing users
-    2. Use Java with a web framework (Spring Boot)
-    3. Implement endpoints for Create, Read, Update, Delete operations
-    4. Use the MVC architecture, with separate models, views, and controllers
-    5. Include proper error handling
-    6. Add basic logging
-    7. Make it production-ready with proper structure
-    8. Include requirements.txt file
-    9. Add a README.md with setup instructions
-
-    The backend should be simple but follow best practices for a real application.
-    """
     mode = 'without_context'
     if len(sys.argv) >1:
         mode = sys.argv[1]
 
-    processor = DevEvalProcessor(lm_prompt_jsonl_path="C:/Users/cesar/7mo Semestre/DevEval/DevEval/Experiments/prompt/LM_prompt_elements.jsonl", mode='local_file_completion', output_path='results')
-    # processor = DevEvalProcessor(lm_prompt_jsonl_path="/home/piga/BddAgent/data/LM_prompt_elements.jsonl", mode=mode, output_path='results')
-    processor.process()
+    # processor = DevEvalProcessor(lm_prompt_jsonl_path="C:/Users/cesar/7mo Semestre/DevEval/DevEval/Experiments/prompt/LM_prompt_elements.jsonl", mode='local_file_completion', output_path='results')
+    # # processor = DevEvalProcessor(lm_prompt_jsonl_path="/home/piga/BddAgent/data/LM_prompt_elements.jsonl", mode=mode, output_path='results')
+    # processor.process()
 
     # try:
     #     result_memory = project_manager.run(
@@ -546,6 +608,10 @@ def main():
     # except Exception as e:
     #     print(f"Error during agent execution: {str(e)}")
     #     traceback.print_exc()
+
+    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="C:/Users/cesar/OneDrive - Instituto Tecnologico y de Estudios Superiores de Monterrey/8vo Semestre/DiseñoAvanzado/BddAgent-Triton-/tritonCodeBlocks.jsonl", output_path="/triton_results")
+    memory = tritonProcessor.process()
+    print(memory.items[-1])
 
 if __name__ == "__main__":
     main()
