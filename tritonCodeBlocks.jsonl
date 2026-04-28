@@ -1,0 +1,1 @@
+{"code": "import torch\nA = torch.randn(3, 4)\nB = torch.randn(4, 5)\nC = torch.matmul(A, B)\nC = A @ B"}
