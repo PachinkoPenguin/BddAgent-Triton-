@@ -4,8 +4,9 @@ import os
 import sys
 import re
 import traceback
+import torch
 
-from game.actionContext import create_action_context_with_registry
+from game.actionContext import create_action_context_with_registry, ActionContext
 from game.actions import DecoratorActionRegistry
 from game.agent import Agent, AgentRegistry
 from game.environment import ActionContextEnvironment
@@ -13,7 +14,8 @@ from game.llms import create_simple_llm_function
 from game.memory import Goal, Memory
 from game.agentLanguage import AgentFunctionCallingActionLanguage
 
-import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, tools.devEvalTools, tools.tritonTools
+import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, tools.tritonTools
+from tools.tritonTools import execute_pytorch_code, execute_triton_code, validate_outputs
 
 class PyTorchToTritonProcessor:
     def __init__(self, llm_function, input_path: str, output_path: str = "triton_kernels.jsonl"):
@@ -37,32 +39,57 @@ class PyTorchToTritonProcessor:
                     print(f"Error decoding JSON line: {line}\nError: {str(e)}")
         print(samples)
         return samples
+      
+    def extract_triton_from_memory(self, memory):
+        for item in reversed(memory.items):
+            content = str(item.get("content", ""))
+            
+            # Buscar en contenido que tenga código Triton
+            if "@triton.jit" in content or "triton.language" in content:
+                # Limpiar JSON escapado si es necesario
+                try:
+                    data = json.loads(content)
+                    if "result" in data:
+                        content = str(data["result"])
+                except json.JSONDecodeError:
+                    pass
+                
+                # Extraer el código entre comillas si está escapado
+                content = content.replace("\\n", "\n").replace('\\"', '"')
+                
+                # Encontrar desde el import hasta el final del código
+                start = content.find("import torch")
+                if start == -1:
+                    start = content.find("import triton")
+                if start != -1:
+                    code = content[start:]
+                    cut = code.find('{"tool_name"')
+                    if cut != -1:
+                        code = code[:cut]
+                    for marker in ['# Example usage', '# Run the example', 'if __name__', '\nA = torch.tensor', '\nA = torch.randn']:
+                        cut2 = code.find(marker)
+                        if cut2 != -1:
+                            code = code[:cut2]
+                    return code.strip()
+        
+        return None
     
     def create_triton_task(self, pytorch_code: str) -> str:
         task = f"""
-AVAILABLE AGENTS (use EXACTLY these names):
-- "TritonDeveloper": generates Triton kernel code
-- "TritonReviewer": reviews and validates Triton code
+    Complete these 4 steps in order. Do not skip any step.
 
-YOU MUST COMPLETE ALL THESE STEPS IN ORDER, DO NOT SKIP ANY:
-1. Use get_gpu_specs tool to get GPU architecture information.
-2. Call agent "TritonDeveloper" with the PyTorch code and GPU specs to generate a Triton kernel.
-3. Call agent "TritonReviewer" with the generated kernel to validate it.
-4. Use execute_pytorch_code tool to run the original PyTorch code and get results.
-5. Use execute_triton_code tool to run the generated Triton kernel and get results.
-6. Use validate_outputs tool to compare both results.
-7. You MUST Use save_to_dataset tool to save everything.
-8. Only after completing ALL steps above, call terminate.
+    1. get_gpu_specs
+    2. call_agent_with_selected_context → "TritonDeveloper" → generate a Triton kernel for this PyTorch code:
+    {pytorch_code}
+    3. call_agent_with_selected_context → "TritonReviewer" → review the generated kernel for correctness
+    4. terminate with the final reviewed Triton kernel code as the message
 
-PyTorch code:
-{pytorch_code}
-
-CRITICAL: You MUST call save_to_dataset before terminate. Do not skip steps.
-"""
+    Do not execute any code. Do not call validate_outputs or save_to_dataset. Just generate, review, and terminate.
+    """
         return task
 
     def process(self):
-        for sample in self.pytorch_code_samples:
+        for idx, sample in enumerate(self.pytorch_code_samples):
             try:
                 pytorch_code = sample['pytorch_code']
                 
@@ -84,27 +111,90 @@ CRITICAL: You MUST call save_to_dataset before terminate. Do not skip steps.
                     "project_type": "triton_kernel",
                     "shared_memory": sharedMemory,
                     "llm": self.llm_function,
-                    "dataset_path": self.output_path
+                    "dataset_path": self.output_path,
+                    "seed": idx
                 }
 
                 result_memory = mainAgent.run(
                     user_input=task,
                     memory=sharedMemory,
                     action_context_props=action_context)
+
+                triton_code = self.extract_triton_from_memory(sharedMemory)
+
+                gpu_specs = None
+                pytorch_execution = None
+                triton_execution = None
+                validation = None
+
+
+                for item in sharedMemory.items:
+                    content = str(item.get("content", ""))
+                    try:
+                        data = json.loads(content)
+                        result = data.get("result", {})
+                        if isinstance(result, str):
+                            result = json.loads(result)
+                        if "device_name" in result:
+                            gpu_specs = result
+                        if "execution_time_ms" in result and pytorch_execution is None:
+                            pytorch_execution = result
+                        elif "execution_time_ms" in result:
+                            triton_execution = result
+                        if "max_difference" in result or "shape_match" in result:
+                            validation = result
+                    except:
+                        pass
+
+                print(pytorch_code)
+                print()
+                print(triton_code)
+
+                if triton_code:
+                    action_context_exec = ActionContext({"seed": idx})
+                    pytorch_result = execute_pytorch_code(action_context=action_context_exec, pytorch_code=pytorch_code)
+                    input_tensors = pytorch_result.pop("input_tensors", {})
+                    triton_result = execute_triton_code(action_context=action_context_exec, triton_code=triton_code, input_tensors=input_tensors)
+
+                    validation_result = None
+                    if pytorch_result.get("success") and triton_result.get("success"):
+                        import json
+                        validation_result = validate_outputs(
+                            action_context=action_context_exec,
+                            pytorch_result=json.dumps(pytorch_result["result"]),
+                            triton_result=json.dumps(triton_result["result"])
+                        )
+
+                    record = {
+                        "pytorch_code": pytorch_code,
+                        "triton_code": triton_code,
+                        "gpu_specs": gpu_specs,
+                        "pytorch_execution": pytorch_result,
+                        "triton_execution": triton_result,
+                        "validation": validation_result,
+                        "success": triton_result.get("success", False)
+                    }
+                    with open(self.output_path, "a") as f:
+                        f.write(json.dumps(record) + "\n")
+                    print("✅ Guardado correctamente")
+                else:
+                    print("❌ No se encontró código Triton en memoria")
+
             except Exception as e:
                 print(f"Error processing sample {sample}: {str(e)}")
                 traceback.print_exc()
+
         return result_memory
 
 
 def create_project_manager_agent(llm_function) -> Agent:
     goals = [
-        Goal(1, "PyTorch Analysis", "Thoroughly analyze the provided PyTorch code and requirements to understand the functionality and performance characteristics"),
-        Goal(2, "Agent Coordination", "Delegate specific coding tasks to the developer agent and coordinate the review process with the code reviewer agent"),
-        Goal(3, "Project Oversight", "Ensure the overall project stays on track, meets requirements, and maintains high quality through effective coordination and feedback")
+        Goal(1, "Generate Triton Kernel", "Get GPU specs and coordinate with TritonDeveloper to generate a Triton kernel"),
+        Goal(2, "Review Kernel", "Coordinate with TritonReviewer to validate the kernel statically"),
+        Goal(3, "Terminate", "Terminate with the final kernel code as the message"),
     ]
 
-    action_registry = DecoratorActionRegistry(tags=["triton", "hardware", "execution", "dataset", "selective", "file_operations"])
+    action_registry = DecoratorActionRegistry(tags=["triton", "hardware", "selective"])
     action_registry.register_terminate_tool()
 
     agent_language = AgentFunctionCallingActionLanguage()
@@ -129,7 +219,7 @@ def create_developer_agent(llm_function) -> Agent:
 
 
     # Tools for development and coding
-    action_registry = DecoratorActionRegistry(tags=["generation", "coding"])
+    action_registry = DecoratorActionRegistry(tags=["generation", "triton"])
     action_registry.register_terminate_tool()
 
     agent_language = AgentFunctionCallingActionLanguage()
@@ -157,7 +247,7 @@ def create_code_reviewer_agent(llm_function) -> Agent:
     ]
 
     # Tools for review and quality assurance
-    action_registry = DecoratorActionRegistry(tags=["validation", "review"])
+    action_registry = DecoratorActionRegistry(tags=["validation", "triton", "review"])
     action_registry.register_terminate_tool()
 
     agent_language = AgentFunctionCallingActionLanguage()
@@ -187,7 +277,7 @@ def main():
     ]
     llm_function = create_simple_llm_function(models[5])
 
-    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="C:/Users/cesar/OneDrive - Instituto Tecnologico y de Estudios Superiores de Monterrey/8vo Semestre/DiseñoAvanzado/BddAgent-Triton-/tritonCodeBlocks.jsonl", output_path="/triton_results")
+    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="/content/BddAgent-Triton-/tritonCodeBlocks.jsonl", output_path="/content/BddAgent-Triton-/triton_results.jsonl")
     memory = tritonProcessor.process()
     print(memory.items[-1])
 
