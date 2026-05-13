@@ -66,26 +66,38 @@ Generate the Triton kernel now:
 
     return response
 
-@register_tool(tags=["triton", "execution"])
+@register_tool(tags=["execution"])
 def execute_pytorch_code(action_context: ActionContext, pytorch_code: str) -> dict:
-    """
-    Execute PyTorch code and capture result and execution time.
-    """
     import time
     import torch
 
     try:
+        seed = action_context.get("seed", 42) if action_context else 42
+        torch.manual_seed(seed)
         namespace = {}
         exec(pytorch_code, namespace)
 
+        torch.manual_seed(seed)
         start = time.time()
         exec(pytorch_code, namespace)
         end = time.time()
 
+        result_names = {"C", "output", "result", "out"}
+        input_tensors = {name: val for name, val in namespace.items()
+                        if isinstance(val, torch.Tensor)
+                        and name not in result_names
+                        and not name.startswith("_")}
+
         result_tensor = None
-        for val in namespace.values():
-            if isinstance(val, torch.Tensor):
-                result_tensor = val
+        for name in result_names:
+            if name in namespace and isinstance(namespace[name], torch.Tensor):
+                result_tensor = namespace[name]
+                break
+
+        if result_tensor is None:
+            for val in namespace.values():
+                if isinstance(val, torch.Tensor):
+                    result_tensor = val
 
         return {
             "success": True,
@@ -93,39 +105,44 @@ def execute_pytorch_code(action_context: ActionContext, pytorch_code: str) -> di
             "result": result_tensor.tolist() if result_tensor is not None else None,
             "result_shape": list(result_tensor.shape) if result_tensor is not None else None,
             "result_dtype": str(result_tensor.dtype) if result_tensor is not None else None,
+            "input_tensors": input_tensors
         }
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
-    
-@register_tool(tags=["triton", "execution"])
-def execute_triton_code(action_context: ActionContext, triton_code: str) -> dict:
-    """
-    Execute Triton kernel code and capture result and execution time.
-    """
+        return {"success": False, "error": str(e)}
+
+@register_tool(tags=["execution"])
+def execute_triton_code(action_context: ActionContext, triton_code: str, input_tensors: dict = None) -> dict:
     import time
     import torch
+    import tempfile
+    import importlib
+    import inspect
 
     try:
-        namespace = {}
-        exec(triton_code, namespace)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir='/tmp') as f:
+            f.write(triton_code)
+            tmp_path = f.name
+
+        module_name = tmp_path.replace('/', '_').replace('.py', '')
+        spec = importlib.util.spec_from_file_location(module_name, tmp_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
         launch_fn = None
-        for name, val in namespace.items():
-            if callable(val) and name.startswith("launch"):
-                launch_fn = val
-                break
+        for name in dir(module):
+            val = getattr(module, name)
+            if callable(val) and not name.startswith("_") and not name.endswith("kernel"):
+                if any(x in name for x in ["matmul", "triton", "launch"]):
+                    launch_fn = val
+                    break
 
         if launch_fn is None:
-            return {
-                "success": False,
-                "error": "No launch function found. Function must start with 'launch'"
-            }
+            return {"success": False, "error": "No launch function found"}
+
+        tensors = [val.cuda().float() for val in input_tensors.values()] if input_tensors else []
 
         start = time.time()
-        result = launch_fn()
+        result = launch_fn(*tensors)
         end = time.time()
 
         return {
@@ -136,12 +153,10 @@ def execute_triton_code(action_context: ActionContext, triton_code: str) -> dict
             "result_dtype": str(result.dtype) if isinstance(result, torch.Tensor) else None,
         }
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
+
     
-@register_tool(tags=["triton", "validation"])
+@register_tool(tags=["comparation"])
 def validate_outputs(action_context: ActionContext, pytorch_result: str, triton_result: str) -> dict:
     """
     Compare PyTorch and Triton outputs and record difference metrics.
@@ -177,7 +192,7 @@ def validate_outputs(action_context: ActionContext, pytorch_result: str, triton_
             "reason": str(e)
         }
 
-@register_tool(tags=["triton", "dataset"])
+@register_tool(tags=["dataset"])
 def save_to_dataset(action_context: ActionContext, 
                     pytorch_code: str,
                     triton_code: str,
