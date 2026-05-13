@@ -10,9 +10,9 @@ from game.actionContext import create_action_context_with_registry, ActionContex
 from game.actions import DecoratorActionRegistry
 from game.agent import Agent, AgentRegistry
 from game.environment import ActionContextEnvironment
-from game.llms import create_simple_llm_function
+from game.llms import create_simple_llm_function, create_qwen_llm_function
 from game.memory import Goal, Memory
-from game.agentLanguage import AgentFunctionCallingActionLanguage
+from game.agentLanguage import AgentFunctionCallingActionLanguage, AgentJSONActionLanguage
 
 import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, tools.tritonTools
 from tools.tritonTools import execute_pytorch_code, execute_triton_code, validate_outputs
@@ -66,10 +66,17 @@ class PyTorchToTritonProcessor:
                     cut = code.find('{"tool_name"')
                     if cut != -1:
                         code = code[:cut]
-                    for marker in ['# Example usage', '# Run the example', 'if __name__', '\nA = torch.tensor', '\nA = torch.randn']:
+                    for marker in ['# Example usage', '# Run the example', 'if __name__', 
+                                  '\nA = torch.tensor', '\nA = torch.randn', 
+                                  '# Kernel and launcher', '\n🎉', '\\ud83c',
+                                  '```\\"', '```json', '\n```\n', '"}\n}']:
                         cut2 = code.find(marker)
                         if cut2 != -1:
                             code = code[:cut2]
+                    
+                    # Limpiar caracteres de escape JSON
+                    code = code.replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
+                    
                     return code.strip()
         
         return None
@@ -158,7 +165,6 @@ class PyTorchToTritonProcessor:
 
                     validation_result = None
                     if pytorch_result.get("success") and triton_result.get("success"):
-                        import json
                         validation_result = validate_outputs(
                             action_context=action_context_exec,
                             pytorch_result=json.dumps(pytorch_result["result"]),
@@ -197,7 +203,7 @@ def create_project_manager_agent(llm_function) -> Agent:
     action_registry = DecoratorActionRegistry(tags=["triton", "hardware", "selective"])
     action_registry.register_terminate_tool()
 
-    agent_language = AgentFunctionCallingActionLanguage()
+    agent_language = AgentJSONActionLanguage()
     environment = ActionContextEnvironment()
 
     return Agent(
@@ -222,7 +228,7 @@ def create_developer_agent(llm_function) -> Agent:
     action_registry = DecoratorActionRegistry(tags=["generation", "triton"])
     action_registry.register_terminate_tool()
 
-    agent_language = AgentFunctionCallingActionLanguage()
+    agent_language = AgentJSONActionLanguage()
     environment = ActionContextEnvironment()
 
     return Agent(
@@ -250,7 +256,7 @@ def create_code_reviewer_agent(llm_function) -> Agent:
     action_registry = DecoratorActionRegistry(tags=["validation", "triton", "review"])
     action_registry.register_terminate_tool()
 
-    agent_language = AgentFunctionCallingActionLanguage()
+    agent_language = AgentJSONActionLanguage()
     environment = ActionContextEnvironment()
 
     return Agent(
@@ -262,6 +268,28 @@ def create_code_reviewer_agent(llm_function) -> Agent:
         agent_name="Triton Code Reviewer",
         max_iterations=10
     )
+
+def load_qwen_model():
+    from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+
+    model_path = "/content/drive/MyDrive/Colabs/TritonProject/qwen_model"
+
+    if os.path.exists(model_path):
+        model_id = model_path
+    else:
+        model_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16
+    )
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        quantization_config=bnb_config,
+        device_map="auto",
+    )
+    return model, tokenizer
 
 def main():
 
@@ -277,7 +305,22 @@ def main():
     ]
     llm_function = create_simple_llm_function(models[5])
 
-    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="/content/BddAgent-Triton-/tritonCodeBlocks.jsonl", output_path="/content/BddAgent-Triton-/triton_results.jsonl")
+    model, tokenizer = load_qwen_model()
+    
+    model_path = "/content/drive/MyDrive/Colabs/TritonProject/qwen_model"
+    if not os.path.exists(model_path):
+        model.save_pretrained(model_path)
+        tokenizer.save_pretrained(model_path)
+
+    qwen_llm_function = create_qwen_llm_function(model, tokenizer)
+
+    base_path = "/content/drive/MyDrive/Colabs/TritonProject/BddAgent-Triton-"
+
+    tritonProcessor = PyTorchToTritonProcessor(
+        qwen_llm_function,
+        input_path=f"{base_path}/tritonCodeBlocks.jsonl",
+        output_path=f"{base_path}/triton_results.jsonl"
+    )
     memory = tritonProcessor.process()
     print(memory.items[-1])
 
