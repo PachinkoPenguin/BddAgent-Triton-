@@ -187,7 +187,7 @@ def main():
     ]
     llm_function = create_simple_llm_function(models[5])
 
-    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="C:/Users/cesar/OneDrive - Instituto Tecnologico y de Estudios Superiores de Monterrey/8vo Semestre/DiseñoAvanzado/BddAgent-Triton-/tritonCodeBlocks.jsonl", output_path="/triton_results")
+    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="tritonCodeBlocks.jsonl", output_path="triton_results.jsonl")
     memory = tritonProcessor.process()
     print(memory.items[-1])
 

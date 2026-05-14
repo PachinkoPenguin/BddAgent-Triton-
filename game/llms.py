@@ -185,8 +185,9 @@ def create_simple_llm_function(model_name: str) -> Callable:
 
 
 
-gemini_api_key = os.getenv("gemini_api_key")
-os.environ["GEMINI_API_KEY"] = gemini_api_key
+gemini_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("gemini_api_key")
+if gemini_api_key:
+    os.environ["GEMINI_API_KEY"] = gemini_api_key
 
 def generate_response(messages: List[Dict]):
     try:
