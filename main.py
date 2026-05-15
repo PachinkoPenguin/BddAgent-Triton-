@@ -10,9 +10,9 @@ from game.actionContext import create_action_context_with_registry, ActionContex
 from game.actions import DecoratorActionRegistry
 from game.agent import Agent, AgentRegistry
 from game.environment import ActionContextEnvironment
-from game.llms import create_simple_llm_function
+from game.llms import create_simple_llm_function, create_qwen_llm_function
 from game.memory import Goal, Memory
-from game.agentLanguage import AgentFunctionCallingActionLanguage
+from game.agentLanguage import AgentFunctionCallingActionLanguage, AgentJSONActionLanguage
 
 import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, tools.tritonTools
 from tools.tritonTools import execute_pytorch_code, execute_triton_code, validate_outputs
@@ -44,9 +44,7 @@ class PyTorchToTritonProcessor:
         for item in reversed(memory.items):
             content = str(item.get("content", ""))
             
-            # Buscar en contenido que tenga código Triton
             if "@triton.jit" in content or "triton.language" in content:
-                # Limpiar JSON escapado si es necesario
                 try:
                     data = json.loads(content)
                     if "result" in data:
@@ -54,10 +52,16 @@ class PyTorchToTritonProcessor:
                 except json.JSONDecodeError:
                     pass
                 
-                # Extraer el código entre comillas si está escapado
                 content = content.replace("\\n", "\n").replace('\\"', '"')
                 
-                # Encontrar desde el import hasta el final del código
+                # Buscar bloque python primero
+                if "```python" in content:
+                    start = content.find("```python") + 9
+                    end = content.find("```", start)
+                    if end > start:
+                        return content[start:end].strip()
+                
+                # Fallback: buscar desde import
                 start = content.find("import torch")
                 if start == -1:
                     start = content.find("import triton")
@@ -66,10 +70,16 @@ class PyTorchToTritonProcessor:
                     cut = code.find('{"tool_name"')
                     if cut != -1:
                         code = code[:cut]
-                    for marker in ['# Example usage', '# Run the example', 'if __name__', '\nA = torch.tensor', '\nA = torch.randn']:
+                    for marker in ['# Example usage', '# Run the example', 'if __name__', 
+                                  '\nA = torch.tensor', '\nA = torch.randn', 
+                                  '# Kernel and launcher', '\n🎉', '\\ud83c',
+                                  '```\\"', '```json', '\n```\n', '"}\n}']:
                         cut2 = code.find(marker)
                         if cut2 != -1:
                             code = code[:cut2]
+                    import re
+                    code = re.sub(r'\\\s*\n', '\n', code)
+                    code = re.sub(r'\\+$', '', code, flags=re.MULTILINE)
                     return code.strip()
         
         return None
@@ -158,7 +168,6 @@ class PyTorchToTritonProcessor:
 
                     validation_result = None
                     if pytorch_result.get("success") and triton_result.get("success"):
-                        import json
                         validation_result = validate_outputs(
                             action_context=action_context_exec,
                             pytorch_result=json.dumps(pytorch_result["result"]),
@@ -265,19 +274,24 @@ def create_code_reviewer_agent(llm_function) -> Agent:
 
 def main():
 
-    if not os.getenv("GEMINI_API_KEY"):
-        raise ValueError("GEMINI_API_KEY environment variable not set")
     models = [
         "gemini/gemini-1.5-flash",
         "gemini/gemini-2.0-flash",
         "gemini/gemini-2.0-flash-lite",
         "gemini/gemini-2.5-flash",
         "gemini/gemini-2.5-pro",
-        "azure/gpt-4.1-mini"
+        "azure/gpt-4.1-mini",
+        "ollama/qwen2.5-coder:7b"
     ]
-    llm_function = create_simple_llm_function(models[5])
+    llm_function = create_simple_llm_function(models[6])
 
-    tritonProcessor = PyTorchToTritonProcessor(llm_function, input_path="/content/BddAgent-Triton-/tritonCodeBlocks.jsonl", output_path="/content/BddAgent-Triton-/triton_results.jsonl")
+    base_path = "/content/drive/MyDrive/Colabs/TritonProject/BddAgent-Triton-"
+
+    tritonProcessor = PyTorchToTritonProcessor(
+        llm_function,
+        input_path=f"{base_path}/tritonCodeBlocks.jsonl",
+        output_path=f"{base_path}/triton_results.jsonl"
+    )
     memory = tritonProcessor.process()
     print(memory.items[-1])
 

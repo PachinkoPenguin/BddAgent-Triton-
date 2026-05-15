@@ -16,6 +16,8 @@ def get_gpu_specs(action_context: ActionContext) -> dict:
         
         device = torch.cuda.current_device()
         props = torch.cuda.get_device_properties(device)
+        print(device)
+        print(props)
 
         return {
             "device_name": props.name,
@@ -50,12 +52,21 @@ GPU Specifications:
 {gpu_specs}
 
 Rules:
-- Use the GPU specifications specs to set block sizes and memory constraints.
-- the kernel must produce mathematically identical results to the PyTorch code
-- Include al necessary imports
-- Include a launch function that calls the kernel
-- Return ONLY the complete Python code, no explanations
+- Use the GPU specifications to set block sizes and memory constraints
+- The kernel must produce mathematically identical results to the PyTorch code
+- Include all necessary imports
+- Include a launch function that accepts the input tensors as arguments and returns the result tensor
+- CRITICAL: Pass tensor objects directly to the kernel, NOT their data pointers
+- CORRECT: matmul_kernel[grid](A, B, C, M, N, K, ...)
+- WRONG: matmul_kernel[grid](A.data_ptr(), B.data_ptr(), C.data_ptr(), M, N, K, ...)
+- The launch function name must contain 'triton', 'matmul', or 'launch'
+- Return ONLY the complete Python code, no explanations, no markdown blocks
 
+Return the code in this exact format:
+```python
+# your triton code here
+```
+No other text.
 Generate the Triton kernel now:
 """
     
@@ -117,8 +128,10 @@ def execute_triton_code(action_context: ActionContext, triton_code: str, input_t
     import tempfile
     import importlib
     import inspect
+    import re
 
     try:
+        triton_code = re.sub(r'(\w=)\.data_ptr\(\)', r'\1', triton_code)
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, dir='/tmp') as f:
             f.write(triton_code)
             tmp_path = f.name
