@@ -1,4 +1,10 @@
 .env
 .venv
 /results
+<<<<<<< Updated upstream
 pruebas.py
+=======
+pruebas.py
+tritonCodeBlocks.jsonl
+__pycahche__/
+>>>>>>> Stashed changes
