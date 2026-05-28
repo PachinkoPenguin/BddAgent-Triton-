@@ -285,7 +285,7 @@ def main():
     ollama_model = models[6]
     llm_function = create_simple_llm_function(ollama_model)
 
-    base_path = "/content/drive/MyDrive/Colabs/TritonProject/BddAgent-Triton-"
+    base_path = "/content/BddAgent-Triton-"
     grammar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "triton.gbnf")
 
     grammar_llm_function = create_grammar_constrained_llm_function(
