@@ -97,6 +97,7 @@ class PyTorchToTritonProcessor:
         return task
 
     def process(self):
+        result_memory = None
         for idx, sample in enumerate(self.pytorch_code_samples):
             try:
                 pytorch_code = sample['pytorch_code']
