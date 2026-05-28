@@ -38,7 +38,7 @@ def generate_triton_kernel(action_context: ActionContext, pytorch_code: str, gpu
     """
 
     from game.memory import Prompt
-    generate_response = action_context.get("llm")
+    generate_response = action_context.get("grammar_llm") or action_context.get("llm")
     if not generate_response:
         return "LLM not available in action context"
     #TO DO

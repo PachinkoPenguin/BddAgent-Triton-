@@ -190,6 +190,7 @@ Select memories that provide important context, requirements, constraints, or ba
         memory=filtered_memory,
         action_context_props={
             "llm": action_context.get("llm"),
+            "grammar_llm": action_context.get("grammar_llm"),
             "agent_registry": action_context.get("agent_registry"),
             "dataset_path": action_context.get("dataset_path")
         }
