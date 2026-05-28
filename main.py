@@ -97,7 +97,6 @@ class PyTorchToTritonProcessor:
         return task
 
     def process(self):
-        result_memory = None
         for idx, sample in enumerate(self.pytorch_code_samples):
             try:
                 pytorch_code = sample['pytorch_code']
@@ -286,17 +285,8 @@ def main():
     ollama_model = models[6]
     llm_function = create_simple_llm_function(ollama_model)
 
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    grammar_path = os.path.join(project_root, "triton.gbnf")
-
-    data_path = os.getenv(
-        "TRITON_DATA_PATH",
-        os.path.join(project_root, "tritonCodeBlocks.jsonl"),
-    )
-    results_path = os.getenv(
-        "TRITON_RESULTS_PATH",
-        os.path.join(project_root, "triton_results.jsonl"),
-    )
+    base_path = "/content/drive/MyDrive/Colabs/TritonProject/BddAgent-Triton-"
+    grammar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "triton.gbnf")
 
     grammar_llm_function = create_grammar_constrained_llm_function(
         model_name=ollama_model,
@@ -305,13 +295,12 @@ def main():
 
     tritonProcessor = PyTorchToTritonProcessor(
         llm_function=llm_function,
-        input_path=data_path,
-        output_path=results_path,
+        input_path=f"{base_path}/tritonCodeBlocks.jsonl",
+        output_path=f"{base_path}/triton_results.jsonl",
         grammar_llm_function=grammar_llm_function,
     )
     memory = tritonProcessor.process()
-    if memory is not None and memory.items:
-        print(memory.items[-1])
+    print(memory.items[-1])
 
 if __name__ == "__main__":
     main()
