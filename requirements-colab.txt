@@ -1,0 +1,5 @@
+# Minimal requirements for Google Colab.
+# Everything else (requests, pydantic, aiohttp, jsonschema, etc.) is pre-installed in Colab.
+# Use this instead of requirements.txt to avoid version conflicts with Colab's own packages.
+litellm>=1.7.0
+python-dotenv>=1.0.0
