@@ -310,7 +310,8 @@ def main():
         grammar_llm_function=grammar_llm_function,
     )
     memory = tritonProcessor.process()
-    print(memory.items[-1])
+    if memory is not None and memory.items:
+        print(memory.items[-1])
 
 if __name__ == "__main__":
     main()
