@@ -285,8 +285,17 @@ def main():
     ollama_model = models[6]
     llm_function = create_simple_llm_function(ollama_model)
 
-    base_path = "/content/drive/MyDrive/Colabs/TritonProject/BddAgent-Triton-"
-    grammar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "triton.gbnf")
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    grammar_path = os.path.join(project_root, "triton.gbnf")
+
+    data_path = os.getenv(
+        "TRITON_DATA_PATH",
+        os.path.join(project_root, "tritonCodeBlocks.jsonl"),
+    )
+    results_path = os.getenv(
+        "TRITON_RESULTS_PATH",
+        os.path.join(project_root, "triton_results.jsonl"),
+    )
 
     grammar_llm_function = create_grammar_constrained_llm_function(
         model_name=ollama_model,
@@ -295,8 +304,8 @@ def main():
 
     tritonProcessor = PyTorchToTritonProcessor(
         llm_function=llm_function,
-        input_path=f"{base_path}/tritonCodeBlocks.jsonl",
-        output_path=f"{base_path}/triton_results.jsonl",
+        input_path=data_path,
+        output_path=results_path,
         grammar_llm_function=grammar_llm_function,
     )
     memory = tritonProcessor.process()
