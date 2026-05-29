@@ -26,16 +26,18 @@ class PyTorchToTritonProcessor:
         samples = []
         with open(self.input_path, 'r', encoding='utf-8') as f:
             for line in f:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
                     sample = json.loads(line)
                     pytorch_code = sample['code']
-                    newJSON = {
-                        "pytorch_code": pytorch_code
-                    }
-                    samples.append(newJSON)
+                    samples.append({"pytorch_code": pytorch_code})
                 except json.JSONDecodeError as e:
                     print(f"Error decoding JSON line: {line}\nError: {str(e)}")
-        print(samples)
+                except KeyError:
+                    print(f"Warning: skipping record without 'code' key, found keys: {list(sample.keys())}")
+        print(f"Loaded {len(samples)} samples")
         return samples
       
     def extract_triton_from_memory(self, memory):
