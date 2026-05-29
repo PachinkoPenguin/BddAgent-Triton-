@@ -1,1 +1,11 @@
 {"code": "import torch\nA = torch.randn(3, 4)\nB = torch.randn(4, 5)\nC = torch.matmul(A, B)\nC = A @ B"}
+{"code": "import torch\nX = torch.randn(512, 512)\nY = torch.relu(X)"}
+{"code": "import torch\nX = torch.randn(64, 128)\nY = torch.softmax(X, dim=-1)"}
+{"code": "import torch\nA = torch.randn(1024, 1024)\nB = torch.randn(1024, 1024)\nC = A + B\nC = C * 0.5"}
+{"code": "import torch\nA = torch.randn(8, 64, 128)\nB = torch.randn(8, 128, 64)\nC = torch.bmm(A, B)"}
+{"code": "import torch\nX = torch.randn(256, 256)\nY = torch.sigmoid(X)"}
+{"code": "import torch\nX = torch.randn(512, 512)\nrow_sums = X.sum(dim=1, keepdim=True)\nX_norm = X / (row_sums + 1e-6)"}
+{"code": "import torch\nA = torch.randn(128, 256)\nB = torch.randn(128, 256)\nC = torch.matmul(A, B.T)"}
+{"code": "import torch\nimport torch.nn.functional as F\nX = torch.randn(256, 512)\nY = F.gelu(X)"}
+{"code": "import torch\nQ = torch.randn(8, 64, 64)\nK = torch.randn(8, 64, 64)\nV = torch.randn(8, 64, 64)\nscale = Q.size(-1) ** -0.5\nscores = torch.bmm(Q, K.transpose(-2, -1)) * scale\nattn = torch.softmax(scores, dim=-1)\nout = torch.bmm(attn, V)"}
+{"code": "import torch\nX = torch.randn(32, 512)\nmean = X.mean(dim=-1, keepdim=True)\nvar = X.var(dim=-1, keepdim=True, unbiased=False)\nX_norm = (X - mean) / (var + 1e-5).sqrt()"}
