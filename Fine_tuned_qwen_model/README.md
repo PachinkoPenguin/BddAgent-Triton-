@@ -100,3 +100,17 @@ If you want to retrain or fine-tune the model further:
 > ```
 >
 > Training uses 4-bit quantization and LoRA adapters to fit within consumer GPU memory (e.g., RTX 5060 Ti).
+
+## 📜 License & Acknowledgements
+
+**Base Model:**
+This model is a fine-tuned version of Qwen/Qwen2.5-Coder-7B. The base model and its weights are licensed under the Apache 2.0 License by Alibaba Cloud.
+
+**Training Data:**
+The fine-tuning process utilizes the hkust-nlp/drkernel-rldata dataset created by hkust-nlp. This dataset is distributed under the MIT License:
+
+Copyright (c) hkust-nlp
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
