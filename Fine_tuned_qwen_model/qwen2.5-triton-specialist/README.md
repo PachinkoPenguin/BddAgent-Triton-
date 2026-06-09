@@ -9,202 +9,138 @@ tags:
 - transformers
 - trl
 - unsloth
+- triton
+- code-generation
+- pytorch
 ---
 
-# Model Card for Model ID
+# Qwen-2.5 Triton Specialist
 
-<!-- Provide a quick summary of what the model is/does. -->
-
-
+This repository contains a LoRA adapter fine-tuned to translate standard PyTorch code into highly optimized Triton kernels. It is built on top of the `Qwen/Qwen2.5-Coder-7B` base model using 4-bit quantization.
 
 ## Model Details
 
 ### Model Description
 
-<!-- Provide a longer summary of what this model is. -->
+- **Developed by:** Triple T
+- **Model type:** LoRA adapter (PEFT)
+- **Language(s) (NLP):** Code (Python, Triton)
+- **License:** Apache 2.0
+- **Finetuned from model:** Qwen/Qwen2.5-Coder-7B (via unsloth/qwen2.5-coder-7b-bnb-4bit)
 
+### Model Sources
 
-
-- **Developed by:** [More Information Needed]
-- **Funded by [optional]:** [More Information Needed]
-- **Shared by [optional]:** [More Information Needed]
-- **Model type:** [More Information Needed]
-- **Language(s) (NLP):** [More Information Needed]
-- **License:** [More Information Needed]
-- **Finetuned from model [optional]:** [More Information Needed]
-
-### Model Sources [optional]
-
-<!-- Provide the basic links for the model. -->
-
-- **Repository:** [More Information Needed]
-- **Paper [optional]:** [More Information Needed]
-- **Demo [optional]:** [More Information Needed]
+- **Repository:** [GitHub](https://github.com/PachinkoPenguin/BddAgent-Triton-)
 
 ## Uses
 
-<!-- Address questions around how the model is intended to be used, including the foreseeable users of the model and those affected by the model. -->
-
 ### Direct Use
 
-<!-- This section is for the model use without fine-tuning or plugging into a larger ecosystem/app. -->
+This adapter is designed to be loaded with the base Qwen2.5-Coder-7B model to generate optimized Triton kernels from PyTorch code snippets. It is intended for developers and researchers working on GPU kernel optimization.
 
-[More Information Needed]
+### Downstream Use
 
-### Downstream Use [optional]
-
-<!-- This section is for the model use when fine-tuned for a task, or when plugged into a larger ecosystem/app -->
-
-[More Information Needed]
+Can be integrated into automated code optimization pipelines, IDE assistants, or educational tools for learning Triton programming.
 
 ### Out-of-Scope Use
 
-<!-- This section addresses misuse, malicious use, and uses that the model will not work well for. -->
-
-[More Information Needed]
+- Not intended for general-purpose code generation outside of Triton kernel optimization
+- Should not be used for production-critical systems without thorough validation
 
 ## Bias, Risks, and Limitations
 
-<!-- This section is meant to convey both technical and sociotechnical limitations. -->
-
-[More Information Needed]
+- Generated Triton kernels may require manual verification for correctness and performance
+- The model is trained on a specific dataset and may not generalize to all PyTorch patterns
+- As with all code generation models, outputs should be reviewed before deployment
 
 ### Recommendations
 
-<!-- This section is meant to convey recommendations with respect to the bias, risk, and technical limitations. -->
-
-Users (both direct and downstream) should be made aware of the risks, biases and limitations of the model. More information needed for further recommendations.
+Always validate generated kernels against reference implementations. Test thoroughly on target hardware before production use.
 
 ## How to Get Started with the Model
 
-Use the code below to get started with the model.
+```python
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
 
-[More Information Needed]
+base_model = AutoModelForCausalLM.from_pretrained("unsloth/qwen2.5-coder-7b-bnb-4bit")
+model = PeftModel.from_pretrained(base_model, "./qwen2.5-triton-specialist")
+```
+
+See the parent repository's README for full setup instructions.
 
 ## Training Details
 
 ### Training Data
 
-<!-- This should link to a Dataset Card, perhaps with a short stub of information on what the training data is all about as well as documentation related to data pre-processing or additional filtering. -->
-
-[More Information Needed]
+The model was fine-tuned using the `hkust-nlp/drkernel-rl-data` dataset, which contains PyTorch-to-Triton code pairs.
 
 ### Training Procedure
 
-<!-- This relates heavily to the Technical Specifications. Content here should link to that section when it is relevant to the training procedure. -->
-
-#### Preprocessing [optional]
-
-[More Information Needed]
-
-
 #### Training Hyperparameters
 
-- **Training regime:** [More Information Needed] <!--fp32, fp16 mixed precision, bf16 mixed precision, bf16 non-mixed precision, fp16 non-mixed precision, fp8 mixed precision -->
-
-#### Speeds, Sizes, Times [optional]
-
-<!-- This section provides information about throughput, start/end time, checkpoint size if relevant, etc. -->
-
-[More Information Needed]
+- **Training regime:** 4-bit quantized LoRA (QLoRA)
+- **Method:** Supervised Fine-Tuning (SFT)
+- **Framework:** Unsloth + TRL
 
 ## Evaluation
-
-<!-- This section describes the evaluation protocols and provides the results. -->
 
 ### Testing Data, Factors & Metrics
 
 #### Testing Data
 
-<!-- This should link to a Dataset Card if possible. -->
-
-[More Information Needed]
-
-#### Factors
-
-<!-- These are the things the evaluation is disaggregating by, e.g., subpopulations or domains. -->
-
-[More Information Needed]
+Evaluation is performed using the DRTriton validation dataset.
 
 #### Metrics
 
-<!-- These are the evaluation metrics being used, ideally with a description of why. -->
+Code correctness, syntactic validity of generated Triton kernels, and performance comparison against baseline implementations.
 
-[More Information Needed]
-
-### Results
-
-[More Information Needed]
-
-#### Summary
-
-
-
-## Model Examination [optional]
-
-<!-- Relevant interpretability work for the model goes here -->
-
-[More Information Needed]
-
-## Environmental Impact
-
-<!-- Total emissions (in grams of CO2eq) and additional considerations, such as electricity usage, go here. Edit the suggested text below accordingly -->
-
-Carbon emissions can be estimated using the [Machine Learning Impact calculator](https://mlco2.github.io/impact#compute) presented in [Lacoste et al. (2019)](https://arxiv.org/abs/1910.09700).
-
-- **Hardware Type:** [More Information Needed]
-- **Hours used:** [More Information Needed]
-- **Cloud Provider:** [More Information Needed]
-- **Compute Region:** [More Information Needed]
-- **Carbon Emitted:** [More Information Needed]
-
-## Technical Specifications [optional]
+## Technical Specifications
 
 ### Model Architecture and Objective
 
-[More Information Needed]
+- **Base Architecture:** Qwen2.5-Coder-7B
+- **Adapter Type:** LoRA
+- **Quantization:** 4-bit (bitsandbytes)
 
 ### Compute Infrastructure
 
-[More Information Needed]
-
 #### Hardware
 
-[More Information Needed]
+Training compatible with consumer NVIDIA GPUs (e.g., RTX 5060 Ti) thanks to 4-bit quantization.
 
 #### Software
 
-[More Information Needed]
+- Python 3.12+
+- PyTorch
+- Transformers
+- PEFT
+- Unsloth
+- TRL
 
-## Citation [optional]
+## Citation
 
-<!-- If there is a paper or blog post introducing the model, the APA and Bibtex information for that should go in this section. -->
+If you use this model in your research, please cite the base model and training dataset:
 
 **BibTeX:**
+```bibtex
+@misc{qwen2.5-coder,
+  title={Qwen2.5-Coder: Technical Report},
+  author={Qwen Team},
+  year={2024}
+}
+```
 
-[More Information Needed]
+## License
 
-**APA:**
+This adapter is licensed under the Apache 2.0 License, inherited from the base model Qwen/Qwen2.5-Coder-7B by Alibaba Cloud.
 
-[More Information Needed]
-
-## Glossary [optional]
-
-<!-- If relevant, include terms and calculations in this section that can help readers understand the model or model card. -->
-
-[More Information Needed]
-
-## More Information [optional]
-
-[More Information Needed]
-
-## Model Card Authors [optional]
-
-[More Information Needed]
+The training dataset `hkust-nlp/drkernel-rl-data` is licensed under the MIT License.
 
 ## Model Card Contact
 
-[More Information Needed]
+For questions or issues, please open an issue in the parent repository.
+
 ### Framework versions
 
 - PEFT 0.19.1
