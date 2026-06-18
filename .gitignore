@@ -2,4 +2,5 @@
 .venv
 /results
 pruebas.py
-tritonCodeBlocks.jsonl
+__pycahche__/
+.DS_Store

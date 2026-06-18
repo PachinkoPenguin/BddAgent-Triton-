@@ -1,16 +1,13 @@
 import json
 from typing import List, Dict
 import os
-import sys
-import re
 import traceback
-import torch
 
 from game.actionContext import create_action_context_with_registry, ActionContext
 from game.actions import DecoratorActionRegistry
 from game.agent import Agent, AgentRegistry
 from game.environment import ActionContextEnvironment
-from game.llms import create_simple_llm_function, create_qwen_llm_function
+from game.llms import create_simple_llm_function, create_grammar_constrained_llm_function
 from game.memory import Goal, Memory
 from game.agentLanguage import AgentFunctionCallingActionLanguage, AgentJSONActionLanguage
 
@@ -18,8 +15,9 @@ import tools.agentTools, tools.fileTools, tools.promptTools, tools.otherTools, t
 from tools.tritonTools import execute_pytorch_code, execute_triton_code, validate_outputs
 
 class PyTorchToTritonProcessor:
-    def __init__(self, llm_function, input_path: str, output_path: str = "triton_kernels.jsonl"):
+    def __init__(self, llm_function, input_path: str, output_path: str = "triton_kernels.jsonl", grammar_llm_function=None):
         self.llm_function = llm_function
+        self.grammar_llm_function = grammar_llm_function
         self.input_path = input_path
         self.output_path = output_path
         self.pytorch_code_samples = self.load_pytorch_samples()
@@ -28,16 +26,18 @@ class PyTorchToTritonProcessor:
         samples = []
         with open(self.input_path, 'r', encoding='utf-8') as f:
             for line in f:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
                     sample = json.loads(line)
                     pytorch_code = sample['code']
-                    newJSON = {
-                        "pytorch_code": pytorch_code
-                    }
-                    samples.append(newJSON)
+                    samples.append({"pytorch_code": pytorch_code})
                 except json.JSONDecodeError as e:
                     print(f"Error decoding JSON line: {line}\nError: {str(e)}")
-        print(samples)
+                except KeyError:
+                    print(f"Warning: skipping record without 'code' key, found keys: {list(sample.keys())}")
+        print(f"Loaded {len(samples)} samples")
         return samples
       
     def extract_triton_from_memory(self, memory):
@@ -121,6 +121,7 @@ class PyTorchToTritonProcessor:
                     "project_type": "triton_kernel",
                     "shared_memory": sharedMemory,
                     "llm": self.llm_function,
+                    "grammar_llm": self.grammar_llm_function,
                     "dataset_path": self.output_path,
                     "seed": idx
                 }
@@ -283,14 +284,22 @@ def main():
         "azure/gpt-4.1-mini",
         "ollama/qwen2.5-coder:7b"
     ]
-    llm_function = create_simple_llm_function(models[6])
+    ollama_model = models[6]
+    llm_function = create_simple_llm_function(ollama_model)
 
-    base_path = "/content/drive/MyDrive/Colabs/TritonProject/BddAgent-Triton-"
+    base_path = "/content/BddAgent-Triton-"
+    grammar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "triton.gbnf")
+
+    grammar_llm_function = create_grammar_constrained_llm_function(
+        model_name=ollama_model,
+        grammar_path=grammar_path,
+    )
 
     tritonProcessor = PyTorchToTritonProcessor(
-        llm_function,
+        llm_function=llm_function,
         input_path=f"{base_path}/tritonCodeBlocks.jsonl",
-        output_path=f"{base_path}/triton_results.jsonl"
+        output_path=f"{base_path}/triton_results.jsonl",
+        grammar_llm_function=grammar_llm_function,
     )
     memory = tritonProcessor.process()
     print(memory.items[-1])

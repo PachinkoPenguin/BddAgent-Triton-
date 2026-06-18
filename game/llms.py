@@ -1,8 +1,8 @@
 from litellm import completion
-from typing import List, Dict, Any, Optional, Callable
+from typing import Callable
 import json
-import time
 import os
+import requests
 from dotenv import load_dotenv
 from dataclasses import dataclass
 
@@ -15,6 +15,55 @@ if os.getenv("AZURE4_OPENAI_KEY"):
     os.environ["AZURE_API_KEY"] = os.getenv("AZURE4_OPENAI_KEY")
     os.environ["AZURE_API_BASE"] = os.getenv("AZURE4_OPENAI_ENDPOINT")
     os.environ["AZURE_API_VERSION"] = os.getenv("AZURE4_OPENAI_API_VERSION", "2024-12-01-preview")
+
+
+def create_grammar_constrained_llm_function(model_name: str, grammar_path: str) -> Callable:
+    """LLM function that calls Ollama's /api/generate with a GBNF grammar.
+
+    Uses Ollama's native generate endpoint (not the OpenAI-compatible one) so
+    the grammar parameter reaches llama.cpp's constrained sampler directly.
+    Only valid for ollama/* model names.
+    """
+    with open(grammar_path, "r") as f:
+        grammar = f.read()
+
+    ollama_model = model_name.replace("ollama/", "")
+    ollama_base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+    def llm_function(prompt: Prompt) -> str:
+        try:
+            system_content = ""
+            user_content = ""
+            for msg in prompt.messages:
+                if msg["role"] == "system":
+                    system_content = msg["content"]
+                elif msg["role"] == "user":
+                    user_content = msg["content"]
+
+            payload = {
+                "model": ollama_model,
+                "prompt": user_content,
+                "system": system_content,
+                "grammar": grammar,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": 1500,
+                },
+            }
+
+            response = requests.post(
+                f"{ollama_base_url}/api/generate",
+                json=payload,
+                timeout=180,
+            )
+            response.raise_for_status()
+            return response.json()["response"]
+
+        except Exception as e:
+            return f"Error generating response: {str(e)}"
+
+    return llm_function
 
 
 def create_simple_llm_function(model_name: str) -> Callable:
